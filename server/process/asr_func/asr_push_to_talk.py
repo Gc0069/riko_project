@@ -1,45 +1,49 @@
 import os
 import sounddevice as sd
 import soundfile as sf
-from faster_whisper import WhisperModel
+import requests
+import yaml
 
-def record_and_transcribe(model, output_file="recording.wav", samplerate=44100):
-    """
-    Simple push-to-talk recorder: record -> save -> transcribe -> return text
-    """
-    
-    # Remove existing file
+with open("character_config.yaml", "r") as f:
+    config = yaml.safe_load(f)
+
+DEEPGRAM_API_KEY = config["deepgram_api_key"]
+LANGUAGE = config["deepgram_language"]
+
+def record_and_transcribe(output_file="recording.wav", samplerate=44100):
     if os.path.exists(output_file):
         os.remove(output_file)
-    
+
     print("Press ENTER to start recording...")
     input()
-    
     print("🔴 Recording... Press ENTER to stop")
-    
-    # Record audio directly
+
     recording = sd.rec(int(60 * samplerate), samplerate=samplerate, channels=1, dtype='float64')
-    input()  # Wait for stop
+    input()
     sd.stop()
-    
-    print("⏹️  Saving audio...")
-    
-    # Write the file
+
+    print("⏹️ Saving audio...")
     sf.write(output_file, recording, samplerate)
-    
-    print("🎯 Transcribing...")
-    
-    # Transcribe
-    segments, _ = model.transcribe(output_file)
-    transcription = " ".join([segment.text for segment in segments])
-    
+
+    print("🎯 Transcribing with Deepgram...")
+
+    with open(output_file, 'rb') as f:
+        response = requests.post(
+            "https://api.deepgram.com/v1/listen",
+            headers={
+                "Authorization": f"Token {DEEPGRAM_API_KEY}"
+            },
+            params={
+                "language": LANGUAGE
+            },
+            data=f
+        )
+
+    if response.status_code != 200:
+        print("Error from Deepgram:", response.text)
+        return ""
+
+    transcription = response.json()["results"]["channels"][0]["alternatives"][0]["transcript"]
     print(f"Transcription: {transcription}")
     return transcription.strip()
-
-
-# Example usage
-if __name__ == "__main__":
-    model = WhisperModel("base.en", device="cpu", compute_type="float32")
-    result = record_and_transcribe(model)
-    print(f"Got: '{result}'")
     
