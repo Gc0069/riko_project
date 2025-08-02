@@ -1,32 +1,22 @@
-# OpenAI tool calling with history 
-### Uses a sample function
-import yaml
-import gradio as gr
+import requests
 import json
+import yaml
 import os
-from openai import OpenAI
 
 with open('character_config.yaml', 'r') as f:
-    char_config = yaml.safe_load(f)
+    config = yaml.safe_load(f)
 
-client = OpenAI(api_key=char_config['OPENAI_API_KEY'])
+API_KEY = config['CHUTES_API_KEY']
+MODEL = config['CHUTES_MODEL']
+HISTORY_FILE = config['history_file']
 
-# Constants
-HISTORY_FILE = char_config['history_file']
-MODEL = char_config['model']
-SYSTEM_PROMPT =  [
-        {
-            "role": "system",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": char_config['presets']['default']['system_prompt']  
-                }
-            ]
-        }
-    ]
+SYSTEM_PROMPT = [
+    {
+        "role": "system",
+        "content": config['presets']['default']['system_prompt']
+    }
+]
 
-# Load/save chat history
 def load_history():
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r") as f:
@@ -37,55 +27,45 @@ def save_history(history):
     with open(HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=2)
 
+def get_riko_response(messages):
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
 
+    payload = {
+        "model": MODEL,
+        "messages": messages,
+        "temperature": 1.0
+    }
 
-def get_riko_response_no_tool(messages):
-
-    # Call OpenAI with system prompt + history
-    response = client.responses.create(
-        model=MODEL,
-        input= messages,
-        temperature=1,
-        top_p=1,
-        max_output_tokens=2048,
-        stream=False,
-        text={
-            "format": {
-            "type": "text"
-            }
-        },
+    response = requests.post(
+        "https://chroma.chutes.ai/v1/chat/completions",
+        headers=headers,
+        json=payload
     )
 
-    return response
+    if response.status_code != 200:
+        print("Error from Chutes:", response.text)
+        return "Sorry senpai, I couldn't think of anything!"
 
+    return response.json()["choices"][0]["message"]["content"]
 
 def llm_response(user_input):
-
     messages = load_history()
 
-    # Append user message to memory
     messages.append({
         "role": "user",
-        "content": [
-            {"type": "input_text", "text": user_input}
-        ]
+        "content": user_input
     })
 
+    reply = get_riko_response(messages)
 
-    riko_test_response = get_riko_response_no_tool(messages)
-
-
-    # just append assistant message to regular response. 
     messages.append({
-    "role": "assistant",
-    "content": [
-        {"type": "output_text", "text": riko_test_response.output_text}
-    ]
+        "role": "assistant",
+        "content": reply
     })
 
     save_history(messages)
-    return riko_test_response.output_text
-
-
-if __name__ == "__main__":
-    print('running main')
+    return reply
+    
